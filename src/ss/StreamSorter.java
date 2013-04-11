@@ -11,7 +11,6 @@ public class StreamSorter {
 	final ConcurrentBuffer<SAMRecord> buffer;
 	final SAMReaderProducer reader;
 	final Consumer<SAMRecord> consumer;
-	//final SAMFileWriter outputWriter;
 	
 	public StreamSorter(InputStream inputAln, File outputFile) {
 		reader = new SAMReaderProducer(inputAln);
@@ -21,6 +20,8 @@ public class StreamSorter {
 	
 	public void startSorting() {
 		
+		//Producer thread will read from input stream and push to the buffer, consumer threads
+		//pull records from the buffer and do 
 		buffer.start();
 		
 	}
