@@ -47,6 +47,29 @@ public class BinGroup<T> {
 	public int size() {
 		return recordsAdded;
 	}
+	
+	/**
+	 * Returns number of records stored in RAM (not written to disk)
+	 * @return
+	 */
+	public long memSize() {
+		int total = 0;
+		for(int i=0; i<bins.length; i++) {
+			if (bins[i] != null)
+				total+= bins[i].memSize();
+		}
+		return total;
+	}
+	
+	public int getUsedBinCount() {
+		int total = 0;
+		for(int i=0; i<bins.length; i++) {
+			if (bins[i] != null && bins[i].size() > 0)
+				total++;
+		}
+		return total;
+	}
+	
 	/**
 	 * Write all bins in ascending order to the given writer
 	 * @param writer

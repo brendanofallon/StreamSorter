@@ -14,6 +14,8 @@ public interface Bin<T> {
 	
 	public int size();
 	
+	public int memSize();
+	
 	public void sortAll();
 	
 	public boolean isSorted();

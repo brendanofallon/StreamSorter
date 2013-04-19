@@ -1,68 +1,95 @@
 package ss;
 
 
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.io.OutputStreamWriter;
 import java.util.Date;
 import java.util.concurrent.Executors;
 
-import net.sf.samtools.SAMFileWriterFactory;
-import net.sf.samtools.SAMRecord;
+import javax.swing.Timer;
+
 import ss.bin.Bin;
 import ss.bin.BinFactory;
 import ss.bin.BinGroup;
-import ss.bin.SAMRecordBinFactory;
+import ss.bin.SAMStringBinFactory;
 import ss.buffer.ConcurrentBuffer;
-import ss.buffer.Consumer;
+import ss.sam.SAMHeader;
+import ss.sam.SAMString;
+import ss.sam.SAMStringConsumer;
+import ss.sam.SAMStringProducer;
+import ss.sam.SAMStringWriter;
 
 
 
 public class StreamSorter {
 
-	final ConcurrentBuffer<SAMRecord> buffer;
-	final SAMReaderProducer reader;
-	final Consumer<SAMRecord> consumer;
+	final ConcurrentBuffer<SAMString> buffer;
 
 	private MultiBinGroup bins;
 	private OutputStream outputStream;
-	private MultiSorter<SAMRecord> sortingQueue;
-	private BinFactory<SAMRecord> binFactory;
+	private MultiSorter<SAMString> sortingQueue;
+	private BinFactory<SAMString> binFactory;
+	private SAMHeader header = null;
+	public static boolean verbose = true;
 	
-	public StreamSorter(File inputAln, File outputFile) throws FileNotFoundException {
+	public StreamSorter(File inputAln, File outputFile) throws IOException {
 		this(new FileInputStream(inputAln), new FileOutputStream(outputFile));
 	}
 	
-	public StreamSorter(File inputAln, OutputStream outStream) throws FileNotFoundException {
+	public StreamSorter(File inputAln, OutputStream outStream) throws IOException {
 		this(new FileInputStream(inputAln), outStream);
 	}
 	
-	public StreamSorter(InputStream inputAln, OutputStream outStream) {
+	public StreamSorter(InputStream inputAln, OutputStream outStream) throws IOException {
 		this.outputStream = outStream;
-		reader = new SAMReaderProducer(inputAln);
-		binFactory = new SAMRecordBinFactory(new SAMWriterContext(new SAMFileWriterFactory(), reader.getHeader() ));
-		bins = new MultiBinGroup(reader.getHeader(), binFactory);
-		consumer = new SAMRecordConsumer(bins);
-		buffer = new ConcurrentBuffer<SAMRecord>(reader, consumer);
-		sortingQueue = new MultiSorter<SAMRecord>( Executors.newFixedThreadPool(8) );
+		BufferedReader samReader = new BufferedReader(new InputStreamReader(inputAln));
+		header = new SAMHeader(samReader);
+		SAMReferenceDictionary dict = header.getDictionary();
+		binFactory = new SAMStringBinFactory();
+		bins = new MultiBinGroup(dict, binFactory);
+		buffer = new ConcurrentBuffer<SAMString>(new SAMStringProducer(dict, samReader), new SAMStringConsumer(bins));
+		sortingQueue = new MultiSorter<SAMString>( Executors.newFixedThreadPool(4) );
 	}
 	
 	public void startSorting() {
 		Date begin = new Date();
+		
+		Timer monitor = null;
+		
+		if (StreamSorter.verbose) {
+			monitor = new javax.swing.Timer(1000, new ActionListener() {
+				@Override
+				public void actionPerformed(ActionEvent arg0) {
+					reportProgress();
+				}
+			});
+			monitor.setDelay(419);
+			monitor.start();
+		}
 		
 		buffer.start(); //Read all input and put it all in 'bins'
 		
 		Date readTime = new Date();
 		
 		int jobsAdded = 0;
+		if (verbose) {
+			System.err.println("Done reading records, now sorting");
+		}
 		for(int i=0; i<bins.getBinGroupCount(); i++) {
-			BinGroup<SAMRecord> bg = bins.getBinGroup(i);
+			BinGroup<SAMString> bg = bins.getBinGroup(i);
 			for(int j=0; j<bg.getBinCount(); j++) {
-				Bin<SAMRecord> bin = bg.getBin(j);
+				Bin<SAMString> bin = bg.getBin(j);
 				if (bin != null && (! bin.isSorted())) {
 					sortingQueue.add(bin);
 					jobsAdded++;
@@ -74,17 +101,26 @@ public class StreamSorter {
 		//Wait for sorting to complete
 		sortingQueue.waitForCompletion();
 		
+		if (monitor != null) {
+			monitor.stop();
+		}
 		
-		//Producer thread will read from input stream and push to the buffer, consumer threads
-		//pull records from the buffer and do 
-		buffer.start();
 		Date sortTime = new Date();
 		
-		//Emit everything to some destination
-		SAMFileWriterFactory factory = new SAMFileWriterFactory();
-		SAMRecordWriter writer = new SAMRecordWriter(factory.makeSAMWriter(reader.getHeader(), true, outputStream));
+		if (verbose) {
+			System.err.println("Done sorting, writing all to output");
+		}
 		
+		//Emit everything to some destination	
 		try {
+			BufferedWriter headerWriter = new BufferedWriter( new OutputStreamWriter(outputStream));
+	
+			header.writeHeader(headerWriter);
+			
+			headerWriter.flush();
+			
+			Writeable<SAMString> writer = new SAMStringWriter(outputStream);
+			
 			bins.writeAll(writer);
 			writer.close();
 		} catch (IOException e) {
@@ -100,6 +136,11 @@ public class StreamSorter {
 		System.err.println("Write seconds: " + writeTime);
 	}
 	
+	protected void reportProgress() {
+		double memFrac = (double)bins.memorySize() / (double)bins.size();
+		System.err.println("Total records: " + bins.size() + " % mem:" + ("" + memFrac*100.0).substring(0,5) + " used bins: " + bins.getUsedBinTotal());
+	}
+
 	/**
 	 * @param args
 	 */
@@ -109,20 +150,24 @@ public class StreamSorter {
 		
 		Date begin = new Date();
 		StreamSorter ss;
-		if (args.length==0) {
-			ss = new StreamSorter(System.in, System.out);
-			ss.startSorting();
-		}
-		else {
-			try {
-				ss = new StreamSorter(new File(args[0]), System.out);
+		try {
+			if (args.length==0) {
+				ss = new StreamSorter(System.in, System.out);
 				ss.startSorting();
-			} catch (FileNotFoundException e) {
-				System.err.println("Input file : "+ args[0] + " not found");
+			}
+			else {
+				try {
+					ss = new StreamSorter(new File(args[0]), System.out);
+					ss.startSorting();
+				} catch (FileNotFoundException e) {
+					System.err.println("Input file : "+ args[0] + " not found");
+				}
 			}
 		}
-		
-		
+		catch (Exception ex) {
+			System.err.println("Error: " + ex.getLocalizedMessage());
+			ex.printStackTrace();
+		}
 
 		Date end = new Date();
 		double elapsedSecs = (end.getTime() - begin.getTime())/1000.0;
