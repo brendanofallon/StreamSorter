@@ -1,7 +1,7 @@
 package ss.bin;
 
-import ss.SAMWriterContext;
 import net.sf.samtools.SAMRecord;
+import ss.SAMWriterContext;
 
 public class SAMRecordBinFactory implements BinFactory<SAMRecord> {
 
@@ -13,7 +13,8 @@ public class SAMRecordBinFactory implements BinFactory<SAMRecord> {
 	
 	@Override
 	public Bin<SAMRecord> createBin(long start, long end) {
-		return new HybridBin(start, end, context);
+		return new KryoBin(start, end, context);
+		//return new HybridBin(start, end, context);
 	}
 	
 

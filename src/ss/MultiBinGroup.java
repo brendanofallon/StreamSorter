@@ -1,22 +1,18 @@
 package ss;
 
 import java.io.IOException;
+
+import net.sf.samtools.SAMFileHeader;
+import net.sf.samtools.SAMRecord;
+import net.sf.samtools.SAMSequenceRecord;
 import ss.bin.BinFactory;
 import ss.bin.BinGroup;
 
-import net.sf.samtools.*;
-
 public class MultiBinGroup {
-
-	//Number of bins in each bin group
-	final int defaultBinCount = 10;
 	
 	private BinGroup<SAMRecord>[] binGroups;
 	
-	private BinFactory<SAMRecord> binFactory = null;
-	
 	public MultiBinGroup(SAMFileHeader header, BinFactory<SAMRecord> binFactory) {
-		this.binFactory = binFactory;
 		binGroups = (BinGroup<SAMRecord>[]) new BinGroup[ header.getSequenceDictionary().getSequences().size() ];
 		for(SAMSequenceRecord seq : header.getSequenceDictionary().getSequences()) {
 			int binCount = computeBinNumber(seq.getSequenceLength());
@@ -51,6 +47,7 @@ public class MultiBinGroup {
 	public BinGroup<SAMRecord> getBinGroup(int which) {
 		return binGroups[which];
 	}
+	
 	public void writeAll(Writeable<SAMRecord> writer) throws IOException {
 		for(int i=0; i<binGroups.length; i++) {
 			binGroups[i].writeAll(writer);

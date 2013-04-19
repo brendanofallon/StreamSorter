@@ -1,61 +1,75 @@
 package ss.bin;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Iterator;
 import java.util.List;
 
-import net.sf.samtools.SAMFileHeader;
-import net.sf.samtools.SAMFileReader;
-import net.sf.samtools.SAMFileReader.ValidationStringency;
-import net.sf.samtools.SAMFileWriter;
-import net.sf.samtools.SAMFileWriterFactory;
 import net.sf.samtools.SAMRecord;
+
+import org.objenesis.strategy.StdInstantiatorStrategy;
+
 import ss.SAMWriterContext;
 import ss.Writeable;
 
-public class HybridBin extends AbstractSAMRecordBin {
+import com.esotericsoftware.kryo.Kryo;
+import com.esotericsoftware.kryo.io.Input;
+import com.esotericsoftware.kryo.io.Output;
 
-	final int recordMemoryLength = 8192;
+/**
+ * This bin type is like HybridBin in that it maintains some records in memory but spills
+ * to disk if needed. It uses the Kryo library to serialize SAMRecords when writing to disk
+ * @author brendan
+ *
+ */
+public class KryoBin extends AbstractSAMRecordBin {
+
+	final int recordMemoryLength = 1024;
 	final String tmpDir = System.getProperty("java.io.tmpdir");
-	private SAMFileWriter writer = null;
-	private SAMFileHeader header = null;
-	private SAMFileWriterFactory factory = null;
+	private Kryo kryo = null;
+	private Output kryoOutput = null;
+	private Input kryoInput = null;
 	private File tmpFile;
 	private int itemsAdded = 0; //total records added
 	
-	private SAMRecord[] records = null; //dont allocate until we need it
+	private SAMRecord[] records = new SAMRecord[recordMemoryLength];
 	private int arrayUsed = 0;
 	
 	private int refIndex = -1; //Used to ensure that we dont accept records from multiple references
 	
-	public HybridBin(long start, long end, SAMWriterContext writerContext) {
+	public KryoBin(long start, long end, SAMWriterContext writerContext) {
 		super(start, end);
-		this.factory = writerContext.factory;
-		this.header = writerContext.header;
 	}
 
 	@Override
 	public void add(SAMRecord item) {
-		if (records == null) {
-			 records = new SAMRecord[recordMemoryLength];
-		}
-		
 		if (arrayUsed < records.length) {
 			records[arrayUsed] = item;
 			arrayUsed++;
 		}
 		else {
-			if (writer == null) {
+			if (kryo == null) {
+				kryo = new Kryo();
 				String randomBits = randomStr(12);
-				tmpFile = new File(tmpDir + System.getProperty("file.separator") + "streamsorter."+ randomBits + ".bam");
+				tmpFile = new File(tmpDir + System.getProperty("file.separator") + "streamsorter."+ randomBits + ".kryo");
+				try {
+					tmpFile.createNewFile();
+				} catch (IOException e1) {
+					throw new IllegalArgumentException("Could not create kryo output file: " + tmpFile.getAbsolutePath());
+				}
 				tmpFile.deleteOnExit();
-				writer = factory.makeBAMWriter(header, false, tmpFile,1);
+				try {
+					kryoOutput = new Output(new FileOutputStream(tmpFile));
+				} catch (FileNotFoundException e) {
+					throw new IllegalArgumentException("Could not write kryo output file: " + tmpFile.getAbsolutePath());
+				}
 			}
-			writer.addAlignment(item);
+			kryo.writeObject(kryoOutput, item);
 		}
 		
 		if (refIndex < 0) {
@@ -89,10 +103,7 @@ public class HybridBin extends AbstractSAMRecordBin {
 		else {
 			try {
 				//Make sure no more writes happen
-				if (writer == null) {
-					System.err.println("Writer can't be null, array used: " + arrayUsed + " items added: " + itemsAdded);
-				}
-				writer.close();
+				kryoOutput.close();
 				
 				//Put items from array in a list
 				List<SAMRecord> items = new ArrayList<SAMRecord>(itemsAdded);
@@ -112,7 +123,12 @@ public class HybridBin extends AbstractSAMRecordBin {
 				
 				//Write records back to memory, spilling to file if needed
 				int pos = Integer.MIN_VALUE;
-				SAMFileWriter finalWriter = null;
+				try {
+					kryoOutput = new Output(new FileOutputStream(tmpFile));
+				} catch (FileNotFoundException e) {
+					throw new IllegalArgumentException("Could not write kryo output file: " + tmpFile.getAbsolutePath());
+				}
+				
 				for(int index=0; index<items.size(); index++) {
 					SAMRecord rec = items.get(index);
 					
@@ -126,23 +142,12 @@ public class HybridBin extends AbstractSAMRecordBin {
 						records[index] = rec;
 					}
 					else {
-						if (finalWriter == null) {
-							finalWriter = factory.makeBAMWriter(header, true, tmpFile,1);			
-						}
-						finalWriter.addAlignment(rec);	
-					}
-					
+						kryo.writeObject(kryoOutput, rec);	
+					}		
 					
 				}
 				
-				if (finalWriter != null) {
-					try {
-						finalWriter.close();
-					}
-					catch (Exception ex) {
-						System.err.println("Exception closing file " + tmpFile + ": " + ex.getLocalizedMessage());
-					}
-				}
+				kryoOutput.close();
 				sorted = true;
 				
 			} catch (IOException e1) {
@@ -158,13 +163,13 @@ public class HybridBin extends AbstractSAMRecordBin {
 	private List<SAMRecord> readToRAM(List<SAMRecord> items) throws IOException, ClassNotFoundException {
 
 		//Read in all items
-		SAMFileReader reader = new SAMFileReader(tmpFile);
-		reader.setValidationStringency(ValidationStringency.LENIENT);
-		Iterator<SAMRecord> sit = reader.iterator();
-		while(sit.hasNext()) {
-			items.add(sit.next());
+		Input input = new Input(new FileInputStream(tmpFile));
+		kryo.setInstantiatorStrategy(new StdInstantiatorStrategy());
+		while (! input.eof()) {
+			SAMRecord rec = kryo.readObject(input, SAMRecord.class);
+			items.add(rec);
 		}
-		reader.close();
+		input.close();
 		return items;
 	}
 	
@@ -181,18 +186,13 @@ public class HybridBin extends AbstractSAMRecordBin {
 
 		long prevPos = Integer.MIN_VALUE;
 		if (itemsAdded>records.length) {
-			SAMFileReader reader = new SAMFileReader(tmpFile);
-			Iterator<SAMRecord> sit = reader.iterator();
-			while(sit.hasNext()) {
-				SAMRecord rec = sit.next();
-				if (rec.getAlignmentStart() < prevPos) {
-					reader.close();
-					throw new IllegalStateException("Block " + start + "-" + end + " is not sorted!");
-				}
+			Input input = new Input(new FileInputStream(tmpFile));
+			kryo.setInstantiatorStrategy(new StdInstantiatorStrategy());
+			while (! input.eof()) {
+				SAMRecord rec = kryo.readObject(input, SAMRecord.class);
 				output.write(rec);
-				
 			}
-			reader.close();
+			input.close();
 		}
 
 		if (tmpFile != null) {
@@ -212,5 +212,6 @@ public class HybridBin extends AbstractSAMRecordBin {
 	
 	
 	final static char[] chars = new char[]{'a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z','1','2','3','4','5','6','7','8','9','0'};
-	
+
+
 }

@@ -32,7 +32,7 @@ public class StreamSorter {
 	private OutputStream outputStream;
 	private MultiSorter<SAMRecord> sortingQueue;
 	private BinFactory<SAMRecord> binFactory;
-
+	
 	public StreamSorter(File inputAln, File outputFile) throws FileNotFoundException {
 		this(new FileInputStream(inputAln), new FileOutputStream(outputFile));
 	}
@@ -48,29 +48,32 @@ public class StreamSorter {
 		bins = new MultiBinGroup(reader.getHeader(), binFactory);
 		consumer = new SAMRecordConsumer(bins);
 		buffer = new ConcurrentBuffer<SAMRecord>(reader, consumer);
-		sortingQueue = new MultiSorter<SAMRecord>(Executors.newFixedThreadPool(4));
+		sortingQueue = new MultiSorter<SAMRecord>( Executors.newFixedThreadPool(8) );
 	}
 	
 	public void startSorting() {
 		Date begin = new Date();
 		
-		buffer.start(); //
+		buffer.start(); //Read all input and put it all in 'bins'
 		
-		//bins.emitAll();
 		Date readTime = new Date();
 		
+		int jobsAdded = 0;
 		for(int i=0; i<bins.getBinGroupCount(); i++) {
 			BinGroup<SAMRecord> bg = bins.getBinGroup(i);
 			for(int j=0; j<bg.getBinCount(); j++) {
 				Bin<SAMRecord> bin = bg.getBin(j);
-				if (bin != null && (! bin.isSorted()))
+				if (bin != null && (! bin.isSorted())) {
 					sortingQueue.add(bin);
+					jobsAdded++;
+				}
 			}
 		}
 		
 		
 		//Wait for sorting to complete
 		sortingQueue.waitForCompletion();
+		
 		
 		//Producer thread will read from input stream and push to the buffer, consumer threads
 		//pull records from the buffer and do 
