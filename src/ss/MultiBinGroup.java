@@ -21,7 +21,7 @@ public class MultiBinGroup {
 	}
 	
 	private static int computeBinNumber(long length) {
-		int bins=  (int) (length/5e6);
+		int bins=  (int) (length/2e6);
 		return Math.max(bins, 1);
 	}
 	

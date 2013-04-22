@@ -1,5 +1,6 @@
 package ss.buffer;
 
+import java.lang.Thread.UncaughtExceptionHandler;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
@@ -37,6 +38,34 @@ public class ConcurrentBuffer<T> {
 			producerThread = new Thread(producer);
 			consumerThread = new Thread(consumer);
 			
+			//Add uncaught exception handlers to each thread so we are alerted in something goes awry. 
+			producerThread.setUncaughtExceptionHandler(new UncaughtExceptionHandler() {
+
+				@Override
+				public void uncaughtException(Thread arg0, Throwable arg1) {
+					System.err.println("Reader thread has died: " + arg1.getLocalizedMessage());
+					throw new IllegalStateException("Error in reader thread");
+				}
+				
+			});
+			
+			consumerThread.setUncaughtExceptionHandler(new UncaughtExceptionHandler() {
+
+				@Override
+				public void uncaughtException(Thread t, Throwable e) {
+					System.err.println("Consumer thread has died: " + e.getLocalizedMessage());
+					throw new IllegalStateException("Error in consumer thread");
+				}
+				
+			});
+			
+			Runtime.getRuntime().addShutdownHook(new Thread() {
+				public void run() {
+					consumerThread.interrupt();
+					producerThread.interrupt();
+				}
+			});
+			
 			producerThread.start();
 			consumerThread.start();
 			
@@ -55,6 +84,12 @@ public class ConcurrentBuffer<T> {
 				} catch (InterruptedException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
+				}
+				
+				//Check to make sure consumer is still working, some errors
+				//may cause it to die and we'd like to know about it
+				if (! consumerThread.isAlive()) {
+					throw new IllegalStateException("Buffer consumer thread has died.");
 				}
 			}
 			
@@ -81,7 +116,7 @@ public class ConcurrentBuffer<T> {
 			@Override
 			public void run() {
 				
-				while(! producer.isFinishedProducing()) {
+				while(! producer.isFinishedProducing() && (! Thread.interrupted())) {
 					T item = producer.nextItem();
 					if (item != null) {
 						buffer.add(item);
@@ -118,7 +153,7 @@ public class ConcurrentBuffer<T> {
 			@Override
 			public void run() {
 				
-				while(run) {
+				while(run && (! Thread.interrupted())) {
 					T item = buffer.poll();
 					if (item != null) {
 						consumer.processItem(item);

@@ -74,7 +74,7 @@ public class StreamSorter {
 					reportProgress();
 				}
 			});
-			monitor.setDelay(419);
+			monitor.setDelay(1000);
 			monitor.start();
 		}
 		
