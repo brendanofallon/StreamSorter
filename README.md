@@ -19,7 +19,7 @@ Sort a .SAM file, use samtools to convert to .BAM:
 
 Sort on a non-linux system:
 
-java -Xmx8g -jar sorter.jar input.sam > output.sorted.sam
+`java -Xmx8g -jar sorter.jar input.sam > output.sorted.sam`
 
 
 Justification:
