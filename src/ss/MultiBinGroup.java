@@ -21,7 +21,7 @@ public class MultiBinGroup {
 	}
 	
 	private static int computeBinNumber(long length) {
-		int bins=  (int) (length/2e6);
+		int bins=  (int) (length/4e6);
 		return Math.max(bins, 1);
 	}
 	
@@ -31,7 +31,7 @@ public class MultiBinGroup {
 		}
 	}
 	
-	public long size() {
+	public long getTotalRecordsAdded() {
 		long total = 0;
 		for(int i=0; i<binGroups.length; i++) {
 			total += binGroups[i].size();

@@ -8,7 +8,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 public class ConcurrentBuffer<T> {
 
 	//Buffer won't ever contain more than this many items
-		final int MAX_BUFFER_SIZE = 65536;
+		final int MAX_BUFFER_SIZE = 4096;
 
 		//The main storage for items
 		protected Queue<T> buffer = new ConcurrentLinkedQueue<T>();
@@ -54,7 +54,7 @@ public class ConcurrentBuffer<T> {
 				@Override
 				public void uncaughtException(Thread t, Throwable e) {
 					System.err.println("Consumer thread has died: " + e.getLocalizedMessage());
-					throw new IllegalStateException("Error in consumer thread");
+					throw new IllegalStateException("Error in consumer thread " + e.getLocalizedMessage());
 				}
 				
 			});
@@ -105,9 +105,22 @@ public class ConcurrentBuffer<T> {
 			
 		}
 
+		public int getItemsRead() {
+			return producer.getItemsRead();
+		}
+		
+		/**
+		 * Number of elements in queue
+		 * @return
+		 */
+		public int size() {
+			return buffer.size();
+		}
+		
 		class ProducerTask implements Runnable {
 
 			final Producer<T> producer;
+			private int itemsRead = 0;
 			
 			ProducerTask(Producer<T> prod) {
 				this.producer = prod;
@@ -119,6 +132,7 @@ public class ConcurrentBuffer<T> {
 				while(! producer.isFinishedProducing() && (! Thread.interrupted())) {
 					T item = producer.nextItem();
 					if (item != null) {
+						itemsRead++;
 						buffer.add(item);
 					}
 					
@@ -133,6 +147,10 @@ public class ConcurrentBuffer<T> {
 					}
 				}
 				
+			}
+			
+			public int getItemsRead() {
+				return itemsRead;
 			}
 			
 			public boolean isDone() {

@@ -24,7 +24,7 @@ public class SAMStringBin implements Bin<SAMString> {
 	final long start;
 	final long end;
 	protected boolean sorted = true;
-	final int recordMemoryLength = 8192;
+	final int recordMemoryLength = 4096;
 	private Kryo kryo = null;
 	private Output kryoOutput = null;
 	final String tmpDir = System.getProperty("java.io.tmpdir");
@@ -53,18 +53,18 @@ public class SAMStringBin implements Bin<SAMString> {
 		else {
 			if (kryo == null) {
 				kryo = new Kryo();
-				String randomBits = randomStr(12);
-				tmpFile = new File(tmpDir + System.getProperty("file.separator") + "streamsorter."+ randomBits + ".kryo");
+				String randomBits = randomStr(20);
+				tmpFile = new File(tmpDir + System.getProperty("file.separator") + ".ss."+ randomBits + ".kryo");
 				try {
 					tmpFile.createNewFile();
 				} catch (IOException e1) {
-					throw new IllegalArgumentException("Could not create kryo output file: " + tmpFile.getAbsolutePath());
+					throw new IllegalArgumentException("Could not create kryo output file: " + tmpFile.getAbsolutePath() + "\n" + e1.getLocalizedMessage());
 				}
 				tmpFile.deleteOnExit();
 				try {
 					kryoOutput = new Output(new FileOutputStream(tmpFile));
 				} catch (FileNotFoundException e) {
-					throw new IllegalArgumentException("Could not write kryo output file: " + tmpFile.getAbsolutePath());
+					throw new IllegalArgumentException("Could not write kryo output file: " + tmpFile.getAbsolutePath() + "\n" + e.getLocalizedMessage());
 				}
 			}
 			kryo.writeObject(kryoOutput, item);

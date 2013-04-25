@@ -14,6 +14,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
+import java.text.DecimalFormat;
 import java.util.Date;
 import java.util.concurrent.Executors;
 
@@ -137,8 +138,19 @@ public class StreamSorter {
 	}
 	
 	protected void reportProgress() {
-		double memFrac = (double)bins.memorySize() / (double)bins.size();
-		System.err.println("Total records: " + bins.size() + " % mem:" + ("" + memFrac*100.0).substring(0,5) + " used bins: " + bins.getUsedBinTotal());
+		double memFrac = (double)bins.memorySize() / (double)bins.getTotalRecordsAdded();
+		String memStr = "" + memFrac*100.0;
+		if (memStr.length() > 5) {
+			memStr = memStr.substring(0, 5);
+		}
+		
+		double elapsedSecs = (System.currentTimeMillis() - startTime)/1000.0;
+		double readsPerSec = buffer.getItemsRead() / elapsedSecs;
+		
+		String thruStr = (new DecimalFormat("0.0#")).format(readsPerSec);
+		
+		System.err.println("Read: " + buffer.getItemsRead() + "\t Stored: " + bins.getTotalRecordsAdded() + "\t Reads/sec: " + thruStr + "\t %mem:" + memStr + "\t Bins: " + bins.getUsedBinTotal() + " buffer:" + buffer.size());
+		
 	}
 
 	/**
@@ -172,5 +184,8 @@ public class StreamSorter {
 		Date end = new Date();
 		double elapsedSecs = (end.getTime() - begin.getTime())/1000.0;
 	}
+	
+	//Used for computing the number of records processed per second
+	private long startTime = System.currentTimeMillis();
 }
 
